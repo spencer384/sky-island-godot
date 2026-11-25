@@ -1,5 +1,7 @@
 # 天空島號：CK124 天空驛站 (Sky Island Express: CK124)
 
+🎮 **線上直接遊玩 (GitHub Pages)**：https://spencer384.github.io/sky-island-godot/
+
 以 **Godot 4** 打造的 3D 浮空島鐵道貨運與觀光駕駛遊戲。玩家將駕駛歷史名車 **台鐵 CK124 蒸汽機車** 牽引經典藍皮普快車廂，行駛於雲海之上的浮空島環狀鐵道，完成各車站之間的貨物與郵件派送任務。
 
 ---
