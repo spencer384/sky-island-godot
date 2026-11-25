@@ -34,7 +34,22 @@ var pickup_idx := 0
 var dropoff_idx := 2
 var toast_timer := 0.0
 
-const CARGO_NAMES := ["高山茶葉箱", "天文星圖捲", "風車麵粉袋", "天空島郵件"]
+# === 擴充遊戲機制 ===
+var day_cycle_timer := 0.0
+var auto_day_cycle := true # 自動日夜循環 (晴朗白晝 -> 金色黃昏 -> 星夜燈火)
+var time_left := 45.0      # 任務倒數計時
+var coin_items: Array[Node3D] = []
+var sheep_animals: Array[Node3D] = []
+var passenger_count := 0
+var tourist_happiness := 100
+
+const CARGO_LIST := [
+	{ "name": "阿里山高山茶", "type": "cargo", "desc": "茶香四溢的珍貴茶箱" },
+	{ "name": "天文星圖手稿", "type": "cargo", "desc": "紀錄天空島星系的古代星圖" },
+	{ "name": "風車磨坊全麥粉", "type": "cargo", "desc": "村莊烘焙不可或缺的麵粉" },
+	{ "name": "飛艇航空特快信件", "type": "cargo", "desc": "蓋有天空郵局戳印的加急信" },
+	{ "name": "天空島觀光旅行團", "type": "passengers", "desc": "喜愛老火車與雲海風光的遊客" }
+]
 
 func _ready() -> void:
 	var curve := CK124Train3D.create_track_curve()
@@ -52,8 +67,80 @@ func _ready() -> void:
 	train.build(curve)
 
 	_build_clouds()
+	_spawn_track_coins(curve)
+	_spawn_village_sheep()
 	_set_time_mode("day")
 	_assign_new_mission()
+
+func _spawn_track_coins(curve: Curve3D) -> void:
+	var gold_mat := StandardMaterial3D.new()
+	gold_mat.albedo_color = Color("#ffd700")
+	gold_mat.metallic = 0.8
+	gold_mat.roughness = 0.25
+	gold_mat.emission_enabled = true
+	gold_mat.emission = Color("#ffaa00")
+	gold_mat.emission_energy_multiplier = 0.8
+
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.45
+	cm.bottom_radius = 0.45
+	cm.height = 0.12
+	cm.radial_segments = 12
+
+	var total_len := curve.get_baked_length()
+	for i in range(12):
+		var u := (float(i) + 0.5) / 12.0
+		var pos := curve.sample_baked(u * total_len) + Vector3(0, 0.65, 0)
+		var coin := MeshInstance3D.new()
+		coin.mesh = cm
+		coin.material_override = gold_mat
+		coin.position = pos
+		coin.rotation.x = PI * 0.5
+		coin.set_meta("u", u)
+		coin.set_meta("active", true)
+		add_child(coin)
+		coin_items.append(coin)
+
+func _spawn_village_sheep() -> void:
+	var wool_mat := StandardMaterial3D.new()
+	wool_mat.albedo_color = Color("#ffffff")
+	wool_mat.roughness = 0.95
+	var face_mat := StandardMaterial3D.new()
+	face_mat.albedo_color = Color("#222222")
+
+	var coords := [
+		Vector2(-5.0, 4.0),
+		Vector2(2.5, 6.5),
+		Vector2(-8.0, -8.0),
+		Vector2(6.0, -2.0)
+	]
+	for pos in coords:
+		var y := SkyTerrain3D.get_terrain_height(pos.x, pos.y)
+		var sheep := Node3D.new()
+		var body := MeshInstance3D.new()
+		var bm := SphereMesh.new()
+		bm.radius = 0.55
+		bm.height = 1.0
+		body.mesh = bm
+		body.material_override = wool_mat
+		body.position.y = 0.55
+		body.scale = Vector3(1.0, 0.9, 1.25)
+		sheep.add_child(body)
+
+		var head := MeshInstance3D.new()
+		var hm := SphereMesh.new()
+		hm.radius = 0.26
+		hm.height = 0.5
+		head.mesh = hm
+		head.material_override = face_mat
+		head.position = Vector3(0, 0.68, 0.55)
+		sheep.add_child(head)
+
+		sheep.position = Vector3(pos.x, y, pos.y)
+		sheep.set_meta("base_y", y)
+		sheep.set_meta("rot_speed", randf_range(0.2, 0.6))
+		add_child(sheep)
+		sheep_animals.append(sheep)
 
 func _build_clouds() -> void:
 	var c_mat := StandardMaterial3D.new()
@@ -89,6 +176,10 @@ func _assign_new_mission() -> void:
 	pickup_idx = randi() % village.stations.size()
 	dropoff_idx = (pickup_idx + 1 + randi() % (village.stations.size() - 1)) % village.stations.size()
 	has_cargo = false
+	time_left = 50.0 # 每次新任務提供 50 秒倒數
+	var current_cargo: Dictionary = CARGO_LIST[deliveries % CARGO_LIST.size()]
+	if current_cargo["type"] == "passengers":
+		passenger_count = randi_range(6, 16)
 	_update_station_rings()
 
 func _update_station_rings() -> void:
@@ -175,19 +266,24 @@ func _check_station_interaction() -> void:
 	var st_u: float = village.stations[target_idx]["u"]
 	var du := absf(fposmod(train.progress_u - st_u + 0.5, 1.0) - 0.5)
 	if du < 0.065:
+		var cargo_info: Dictionary = CARGO_LIST[deliveries % CARGO_LIST.size()]
 		if not has_cargo:
 			has_cargo = true
 			train.steam_pressure = minf(100.0, train.steam_pressure + 35.0)
 			_update_station_rings()
-			_show_toast("✅ 已裝載貨物！前往「%s」卸貨 (+35%% 蒸汽)" % village.stations[dropoff_idx]["name"])
+			if cargo_info["type"] == "passengers":
+				_show_toast("🚂 %d 位遊客已上車！開往「%s」觀光並鳴笛下車 (+35%% 蒸汽)" % [passenger_count, village.stations[dropoff_idx]["name"]])
+			else:
+				_show_toast("📦 已裝載「%s」！開往「%s」卸貨 (+35%% 蒸汽)" % [cargo_info["name"], village.stations[dropoff_idx]["name"]])
 		else:
 			deliveries += 1
 			var night_bonus := 2 if time_mode == "night" else 1
-			var pts := 100 * combo * night_bonus
+			var speed_bonus := int(time_left * 5.0) # 速度獎勵
+			var pts := (120 * combo * night_bonus) + speed_bonus
 			score += pts
 			combo = mini(5, combo + 1)
 			train.steam_pressure = minf(100.0, train.steam_pressure + 45.0)
-			_show_toast("🎉 任務完成！送達「%s」 +%d 分 (連擊 x%d)" % [village.stations[dropoff_idx]["name"], pts, combo])
+			_show_toast("🎉 準時送達「%s」！獲得 +%d 分 (連擊 x%d, 速度獎勵 +%d)" % [village.stations[dropoff_idx]["name"], pts, combo, speed_bonus])
 			_assign_new_mission()
 
 func _process(delta: float) -> void:
@@ -195,6 +291,41 @@ func _process(delta: float) -> void:
 	terrain.update_terrain(delta, elapsed)
 	village.update_village(delta, elapsed)
 	train.update_train(delta)
+
+	# 自動晝夜時間流轉
+	if auto_day_cycle:
+		day_cycle_timer += delta
+		if day_cycle_timer > 35.0:
+			day_cycle_timer = 0.0
+			var next_mode := "dusk" if time_mode == "day" else ("night" if time_mode == "dusk" else "day")
+			_set_time_mode(next_mode)
+			_show_toast("☀️ 天色轉換：%s" % ("晴朗白晝" if next_mode == "day" else ("金色黃昏" if next_mode == "dusk" else "星夜燈火")))
+
+	# 任務倒數計時
+	if time_left > 0.0:
+		time_left = maxf(0.0, time_left - delta)
+		if time_left == 0.0 and combo > 1:
+			combo = 1
+			_show_toast("⚠️ 任務逾時！連擊倍率重置為 x1")
+
+	# 動畫：鐵軌金幣旋轉與收集
+	for coin in coin_items:
+		if coin.get_meta("active"):
+			coin.rotation.y += delta * 3.5
+			var cu: float = coin.get_meta("u")
+			var c_du := absf(fposmod(train.progress_u - cu + 0.5, 1.0) - 0.5)
+			if c_du < 0.015:
+				coin.set_meta("active", false)
+				coin.visible = false
+				score += 25
+				train.steam_pressure = minf(100.0, train.steam_pressure + 8.0)
+				_show_toast("🪙 獲得金幣！+25分 (+8% 蒸汽)")
+
+	# 動畫：悠閒小羊微擺動
+	for sheep in sheep_animals:
+		var by: float = sheep.get_meta("base_y")
+		sheep.position.y = by + absf(sin(elapsed * 2.0)) * 0.08
+		sheep.rotation.y += delta * sheep.get_meta("rot_speed") * 0.3
 
 	for c in clouds:
 		var ang: float = c.get_meta("angle") + delta * 0.008
@@ -238,16 +369,28 @@ func _update_hud(delta: float, target_du := 1.0) -> void:
 		if toast_timer <= 0.0 and hud_toast_box:
 			hud_toast_box.visible = false
 
-	var cargo_name: String = CARGO_NAMES[deliveries % CARGO_NAMES.size()]
+	var cargo_info: Dictionary = CARGO_LIST[deliveries % CARGO_LIST.size()]
 	if hud_mission:
 		var near_hint := "  🔔 已進站！請按 [空白鍵]！" if target_du < 0.065 else ""
+		var timer_str := "  ⏱️ 限時：%d秒" % int(time_left)
+		var item_text: String = ""
 		if not has_cargo:
-			hud_mission.text = "📦 待取貨物：%s%s\n📍 前往「%s」減速或按空白鍵鳴笛裝載" % [cargo_name, near_hint, village.stations[pickup_idx]["name"]]
+			item_text = "%s (%s)" % [cargo_info["name"], cargo_info["desc"]]
+			hud_mission.text = "📦 待取任務：%s%s\n📍 前往「%s」減速或按空白鍵裝載%s" % [
+				item_text, timer_str, village.stations[pickup_idx]["name"], near_hint
+			]
 		else:
-			hud_mission.text = "🚂 運送中：%s%s\n🎯 送往「%s」減速或按空白鍵鳴笛卸貨" % [cargo_name, near_hint, village.stations[dropoff_idx]["name"]]
+			if cargo_info["type"] == "passengers":
+				item_text = "%s (%d 人)" % [cargo_info["name"], passenger_count]
+			else:
+				item_text = cargo_info["name"]
+			hud_mission.text = "🚂 運送中：%s%s\n🎯 送往「%s」減速或按空白鍵卸貨%s" % [
+				item_text, timer_str, village.stations[dropoff_idx]["name"], near_hint
+			]
 
 	if hud_stats:
 		var kmh := int(absf(train.speed_u) * 1400.0)
-		hud_stats.text = "積分: %d  |  已送達: %d  |  蒸汽壓力: %d%%  |  時速: %d km/h\n操作: W/S 加減速 · 空白鍵 鳴笛/裝卸 · 1-4 視角 · Q/R/E 日/昏/夜" % [
-			score, deliveries, int(train.steam_pressure), kmh
+		var mode_zh := "晴朗白晝" if time_mode == "day" else ("金色黃昏" if time_mode == "dusk" else "星夜燈火")
+		hud_stats.text = "積分: %d  |  送達: %d次  |  連擊: x%d  |  蒸汽: %d%%  |  時速: %d km/h  |  天色: %s\n操作: W/S 加減速 · 空白鍵 鳴笛/裝卸 · 1-4 視角 · Q/R/E 手動切換天色" % [
+			score, deliveries, combo, int(train.steam_pressure), kmh, mode_zh
 		]
