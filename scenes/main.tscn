@@ -1,6 +1,11 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://scripts/game_manager.gd" id="1_gm"]
+[ext_resource type="FontFile" uid="uid://byxsetyi3br0g" path="res://fonts/kaiu.ttf" id="2_font"]
+
+[sub_resource type="Theme" id="Theme_cjk"]
+default_font = ExtResource("2_font")
+default_font_size = 15
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_1"]
 sky_top_color = Color(0.172549, 0.486275, 0.819608, 1)
@@ -46,6 +51,7 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+theme = SubResource("Theme_cjk")
 mouse_filter = 2
 
 [node name="MissionBox" type="PanelContainer" parent="CanvasLayer/HUD"]
